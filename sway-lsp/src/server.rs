@@ -5,6 +5,7 @@ use crate::core::{
 };
 use crate::utils::debug::{self, DebugFlags};
 use forc_util::find_manifest_dir;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use sway_utils::helpers::get_sway_files;
 use tower_lsp::lsp_types::*;
@@ -230,6 +231,24 @@ impl LanguageServer for Backend {
             self.session.clone(),
             params,
         ))
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FileTypeParams {
+    path: String,
+}
+
+// Custom LSP-Server Methods
+impl Backend {
+    pub async fn file_type(&self, params: FileTypeParams) -> jsonrpc::Result<Option<String>> {
+        if let Some(document) = self.session.documents.get(&params.path) {
+            if let Some(file_type) = document.sway_file_type() {
+                let file_type = file_type.to_string();
+                return Ok(Some(file_type));
+            }
+        }
+        Ok(None)
     }
 }
 

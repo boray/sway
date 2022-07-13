@@ -10,7 +10,7 @@ use ropey::Rope;
 use std::{collections::HashMap, path::PathBuf};
 use sway_core::{
     semantic_analysis::ast_node::TypedAstNode, CompileAstResult, CompileResult, ParseProgram,
-    TypeInfo,
+    TreeType, TypeInfo,
 };
 use sway_types::Ident;
 use tower_lsp::lsp_types::{Diagnostic, Position, Range, TextDocumentContentChangeEvent};
@@ -24,6 +24,7 @@ pub struct TextDocument {
     uri: String,
     content: Rope,
     token_map: TokenMap,
+    sway_file_type: Option<TreeType>,
 }
 
 impl TextDocument {
@@ -35,6 +36,7 @@ impl TextDocument {
                 uri: path.into(),
                 content: Rope::from_str(&content),
                 token_map: HashMap::new(),
+                sway_file_type: None,
             }),
             Err(_) => Err(DocumentError::DocumentNotFound),
         }
@@ -97,6 +99,10 @@ impl TextDocument {
 
     pub fn get_uri(&self) -> &str {
         &self.uri
+    }
+
+    pub fn sway_file_type(&self) -> Option<&TreeType> {
+        self.sway_file_type.as_ref()
     }
 
     pub fn parse(&mut self) -> Result<Vec<Diagnostic>, DocumentError> {
@@ -187,6 +193,9 @@ impl TextDocument {
                 Err(DocumentError::FailedToParse(diagnostics))
             }
             Some(parse_program) => {
+                self.sway_file_type = Some(parse_program.kind);
+                eprintln!("self.sway_file_type = {:#?}", self.sway_file_type);
+
                 for node in &parse_program.root.tree.root_nodes {
                     traverse_parse_tree::traverse_node(node, &mut self.token_map);
                 }
