@@ -3684,7 +3684,6 @@ name = "sway-lsp"
 version = "0.18.1"
 dependencies = [
  "async-trait",
- "dashmap",
  "forc",
  "forc-pkg",
  "forc-util",
