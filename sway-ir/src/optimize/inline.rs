@@ -11,7 +11,7 @@ use crate::{
     error::IrError,
     function::Function,
     instruction::Instruction,
-    metadata::MetadataIndex,
+    metadata::{combine, MetadataIndex},
     pointer::Pointer,
     value::{Value, ValueContent, ValueDatum},
 };
@@ -95,9 +95,9 @@ pub fn inline_function_call(
         }
     }
 
-    // Get the state index metadata attached to the function call. This needs to be propagated to
-    // the __get_storage_key intrinsic
-    let state_idx_md_idx = context.values[call_site.0].state_idx_md_idx;
+    // Get the metadata attached to the function call which may need to be propagated to the
+    // inlined instructions.
+    let metadata = context.values[call_site.0].metadata;
 
     // Now remove the call altogether.
     context.values.remove(call_site.0);
@@ -146,7 +146,7 @@ pub fn inline_function_call(
                 &block_map,
                 &mut value_map,
                 &ptr_map,
-                state_idx_md_idx,
+                metadata,
             );
         }
     }
@@ -182,7 +182,7 @@ fn inline_instruction(
     block_map: &HashMap<Block, Block>,
     value_map: &mut HashMap<Value, Value>,
     ptr_map: &HashMap<Pointer, Pointer>,
-    state_idx_md_idx: Option<MetadataIndex>,
+    fn_metadata: Option<MetadataIndex>,
 ) {
     // Util to translate old blocks to new.  If an old block isn't in the map then we panic, since
     // it should be guaranteed to be there...that's a bug otherwise.
@@ -202,11 +202,13 @@ fn inline_instruction(
     // restructure instructions somehow, so we don't need a persistent `&Context` to access them.
     if let ValueContent {
         value: ValueDatum::Instruction(old_ins),
-        span_md_idx,
-        state_idx_md_idx: current_state_idx_md_idx,
-        ..
+        metadata: val_metadata,
     } = context.values[instruction.0].clone()
     {
+        // Combine the function metadata with this instruction metadata so we don't lose the
+        // function metadata after inlining.
+        let metadata = combine(context, &fn_metadata, &val_metadata);
+
         let new_ins = match old_ins {
             Instruction::AsmBlock(asm, args) => {
                 let new_args = args
@@ -220,46 +222,46 @@ fn inline_instruction(
                 // We can re-use the old asm block with the updated args.
                 new_block
                     .ins(context)
-                    .asm_block_from_asm(asm, new_args, span_md_idx)
+                    .asm_block_from_asm(asm, new_args)
+                    .add_metadatum(context, metadata)
             }
-            Instruction::BitCast(value, ty) => {
-                new_block
-                    .ins(context)
-                    .bitcast(map_value(value), ty, span_md_idx)
-            }
+            Instruction::BitCast(value, ty) => new_block
+                .ins(context)
+                .bitcast(map_value(value), ty)
+                .add_metadatum(context, metadata),
             // For `br` and `cbr` below we don't need to worry about the phi values, they're
             // adjusted later in `inline_function_call()`.
-            Instruction::Branch(b) => {
-                new_block
-                    .ins(context)
-                    .branch(map_block(b), None, span_md_idx)
-            }
-            Instruction::Call(f, args) => new_block.ins(context).call(
-                f,
-                args.iter()
-                    .map(|old_val: &Value| map_value(*old_val))
-                    .collect::<Vec<Value>>()
-                    .as_slice(),
-                span_md_idx,
-                current_state_idx_md_idx,
-            ),
-            Instruction::Cmp(pred, lhs_value, rhs_value) => new_block.ins(context).cmp(
-                pred,
-                map_value(lhs_value),
-                map_value(rhs_value),
-                span_md_idx,
-            ),
+            Instruction::Branch(b) => new_block
+                .ins(context)
+                .branch(map_block(b), None)
+                .add_metadatum(context, metadata),
+            Instruction::Call(f, args) => new_block
+                .ins(context)
+                .call(
+                    f,
+                    args.iter()
+                        .map(|old_val: &Value| map_value(*old_val))
+                        .collect::<Vec<Value>>()
+                        .as_slice(),
+                )
+                .add_metadatum(context, metadata),
+            Instruction::Cmp(pred, lhs_value, rhs_value) => new_block
+                .ins(context)
+                .cmp(pred, map_value(lhs_value), map_value(rhs_value))
+                .add_metadatum(context, metadata),
             Instruction::ConditionalBranch {
                 cond_value,
                 true_block,
                 false_block,
-            } => new_block.ins(context).conditional_branch(
-                map_value(cond_value),
-                map_block(true_block),
-                map_block(false_block),
-                None,
-                span_md_idx,
-            ),
+            } => new_block
+                .ins(context)
+                .conditional_branch(
+                    map_value(cond_value),
+                    map_block(true_block),
+                    map_block(false_block),
+                    None,
+                )
+                .add_metadatum(context, metadata),
             Instruction::ContractCall {
                 return_type,
                 name,
@@ -267,111 +269,108 @@ fn inline_instruction(
                 coins,
                 asset_id,
                 gas,
-            } => new_block.ins(context).contract_call(
-                return_type,
-                name,
-                map_value(params),
-                map_value(coins),
-                map_value(asset_id),
-                map_value(gas),
-                span_md_idx,
-            ),
+            } => new_block
+                .ins(context)
+                .contract_call(
+                    return_type,
+                    name,
+                    map_value(params),
+                    map_value(coins),
+                    map_value(asset_id),
+                    map_value(gas),
+                )
+                .add_metadatum(context, metadata),
             Instruction::ExtractElement {
                 array,
                 ty,
                 index_val,
-            } => new_block.ins(context).extract_element(
-                map_value(array),
-                ty,
-                map_value(index_val),
-                span_md_idx,
-            ),
+            } => new_block
+                .ins(context)
+                .extract_element(map_value(array), ty, map_value(index_val))
+                .add_metadatum(context, metadata),
             Instruction::ExtractValue {
                 aggregate,
                 ty,
                 indices,
-            } => {
-                new_block
-                    .ins(context)
-                    .extract_value(map_value(aggregate), ty, indices, span_md_idx)
-            }
+            } => new_block
+                .ins(context)
+                .extract_value(map_value(aggregate), ty, indices)
+                .add_metadatum(context, metadata),
             Instruction::GetStorageKey => new_block
                 .ins(context)
-                .get_storage_key(span_md_idx, state_idx_md_idx),
+                .get_storage_key()
+                .add_metadatum(context, metadata),
             Instruction::GetPointer {
                 base_ptr,
                 ptr_ty,
                 offset,
             } => new_block
                 .ins(context)
-                .get_ptr(map_ptr(base_ptr), ptr_ty, offset, span_md_idx),
-            Instruction::Gtf { index, tx_field_id } => {
-                new_block
-                    .ins(context)
-                    .gtf(map_value(index), tx_field_id, span_md_idx)
-            }
+                .get_ptr(map_ptr(base_ptr), ptr_ty, offset)
+                .add_metadatum(context, metadata),
+            Instruction::Gtf { index, tx_field_id } => new_block
+                .ins(context)
+                .gtf(map_value(index), tx_field_id)
+                .add_metadatum(context, metadata),
             Instruction::InsertElement {
                 array,
                 ty,
                 value,
                 index_val,
-            } => new_block.ins(context).insert_element(
-                map_value(array),
-                ty,
-                map_value(value),
-                map_value(index_val),
-                span_md_idx,
-            ),
+            } => new_block
+                .ins(context)
+                .insert_element(map_value(array), ty, map_value(value), map_value(index_val))
+                .add_metadatum(context, metadata),
             Instruction::InsertValue {
                 aggregate,
                 ty,
                 value,
                 indices,
-            } => new_block.ins(context).insert_value(
-                map_value(aggregate),
-                ty,
-                map_value(value),
-                indices,
-                span_md_idx,
-            ),
-            Instruction::IntToPtr(value, ty) => {
-                new_block
-                    .ins(context)
-                    .int_to_ptr(map_value(value), ty, span_md_idx)
-            }
-            Instruction::Load(src_val) => {
-                new_block.ins(context).load(map_value(src_val), span_md_idx)
-            }
+            } => new_block
+                .ins(context)
+                .insert_value(map_value(aggregate), ty, map_value(value), indices)
+                .add_metadatum(context, metadata),
+            Instruction::IntToPtr(value, ty) => new_block
+                .ins(context)
+                .int_to_ptr(map_value(value), ty)
+                .add_metadatum(context, metadata),
+            Instruction::Load(src_val) => new_block
+                .ins(context)
+                .load(map_value(src_val))
+                .add_metadatum(context, metadata),
             Instruction::Nop => new_block.ins(context).nop(),
-            Instruction::ReadRegister(reg) => {
-                new_block.ins(context).read_register(reg, span_md_idx)
-            }
+            Instruction::ReadRegister(reg) => new_block
+                .ins(context)
+                .read_register(reg)
+                .add_metadatum(context, metadata),
             // We convert `ret` to `br post_block` and add the returned value as a phi value.
-            Instruction::Ret(val, _) => {
-                new_block
-                    .ins(context)
-                    .branch(*post_block, Some(map_value(val)), span_md_idx)
-            }
+            Instruction::Ret(val, _) => new_block
+                .ins(context)
+                .branch(*post_block, Some(map_value(val)))
+                .add_metadatum(context, metadata),
             Instruction::StateLoadQuadWord { load_val, key } => new_block
                 .ins(context)
-                .state_load_quad_word(map_value(load_val), map_value(key), span_md_idx),
+                .state_load_quad_word(map_value(load_val), map_value(key))
+                .add_metadatum(context, metadata),
             Instruction::StateLoadWord(key) => new_block
                 .ins(context)
-                .state_load_word(map_value(key), span_md_idx),
+                .state_load_word(map_value(key))
+                .add_metadatum(context, metadata),
             Instruction::StateStoreQuadWord { stored_val, key } => new_block
                 .ins(context)
-                .state_store_quad_word(map_value(stored_val), map_value(key), span_md_idx),
+                .state_store_quad_word(map_value(stored_val), map_value(key))
+                .add_metadatum(context, metadata),
             Instruction::StateStoreWord { stored_val, key } => new_block
                 .ins(context)
-                .state_store_word(map_value(stored_val), map_value(key), span_md_idx),
+                .state_store_word(map_value(stored_val), map_value(key))
+                .add_metadatum(context, metadata),
             Instruction::Store {
                 dst_val,
                 stored_val,
-            } => {
-                new_block
-                    .ins(context)
-                    .store(map_value(dst_val), map_value(stored_val), span_md_idx)
-            }
+            } => new_block
+                .ins(context)
+                .store(map_value(dst_val), map_value(stored_val))
+                .add_metadatum(context, metadata),
             // NOTE: We're not translating the phi value yet, since this is the single instance of
             // use of a value which may not be mapped yet -- a branch from a subsequent block,
             // back up to this block.  And we don't need to add a `phi` instruction because an
