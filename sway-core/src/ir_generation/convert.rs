@@ -6,13 +6,12 @@ use crate::{
 
 use super::types::{create_enum_aggregate, create_tuple_aggregate};
 
-use sway_ir::{Aggregate, Constant, Context, MetadataIndex, Type, Value};
+use sway_ir::{Aggregate, Constant, Context, Type, Value};
 use sway_types::span::Span;
 
 pub(super) fn convert_literal_to_value(
     context: &mut Context,
     ast_literal: &Literal,
-    span_id_idx: Option<MetadataIndex>,
 ) -> Value {
     match ast_literal {
         // In Sway for now we don't have `as` casting and for integers which may be implicitly cast
@@ -22,17 +21,17 @@ pub(super) fn convert_literal_to_value(
         // do introduce explicit `as` casting, all integers are `u64` as far as the IR is
         // concerned.
         Literal::U8(n) | Literal::Byte(n) => {
-            Constant::get_uint(context, 64, *n as u64, span_id_idx)
+            Constant::get_uint(context, 64, *n as u64)
         }
-        Literal::U16(n) => Constant::get_uint(context, 64, *n as u64, span_id_idx),
-        Literal::U32(n) => Constant::get_uint(context, 64, *n as u64, span_id_idx),
-        Literal::U64(n) => Constant::get_uint(context, 64, *n, span_id_idx),
-        Literal::Numeric(n) => Constant::get_uint(context, 64, *n, span_id_idx),
+        Literal::U16(n) => Constant::get_uint(context, 64, *n as u64),
+        Literal::U32(n) => Constant::get_uint(context, 64, *n as u64),
+        Literal::U64(n) => Constant::get_uint(context, 64, *n),
+        Literal::Numeric(n) => Constant::get_uint(context, 64, *n),
         Literal::String(s) => {
-            Constant::get_string(context, s.as_str().as_bytes().to_vec(), span_id_idx)
+            Constant::get_string(context, s.as_str().as_bytes().to_vec())
         }
-        Literal::Boolean(b) => Constant::get_bool(context, *b, span_id_idx),
-        Literal::B256(bs) => Constant::get_b256(context, *bs, span_id_idx),
+        Literal::Boolean(b) => Constant::get_bool(context, *b),
+        Literal::B256(bs) => Constant::get_b256(context, *bs),
     }
 }
 
