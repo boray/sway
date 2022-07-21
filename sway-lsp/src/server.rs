@@ -236,13 +236,16 @@ impl LanguageServer for Backend {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct FileTypeParams {
-    text_document: TextDocumentIdentifier,
+    // text_document: TextDocumentIdentifier,
+    path: String,
 }
 
 // Custom LSP-Server Methods
 impl Backend {
     pub async fn file_type(&self, params: FileTypeParams) -> jsonrpc::Result<Option<String>> {
-        if let Some(document) = self.session.documents.get(params.text_document.uri.as_str()) {
+        self.log_info_message("client has called the file_type call back!").await;
+        let path = params.path; // params.text_document.uri.as_str()
+        if let Some(document) = self.session.documents.get(&path) {
             if let Some(file_type) = document.sway_file_type() {
                 let file_type = file_type.to_string();
                 return Ok(Some(file_type));
