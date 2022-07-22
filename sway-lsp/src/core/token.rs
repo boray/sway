@@ -1,15 +1,15 @@
 use std::collections::HashMap;
-use sway_core::semantic_analysis::ast_node::{
-    expression::typed_expression::TypedExpression, TypeCheckedStorageReassignDescriptor,
-    TypedDeclaration, TypedEnumVariant, TypedFunctionDeclaration, TypedFunctionParameter,
-    TypedReassignment, TypedStorageField, TypedStructField, TypedTraitFn,
-};
-use sway_types::{Ident, Span};
-
 use sway_core::{
+    semantic_analysis::ast_node::{
+        expression::typed_expression::TypedExpression, TypeCheckedStorageReassignDescriptor,
+        TypedDeclaration, TypedEnumVariant, TypedFunctionDeclaration, TypedFunctionParameter,
+        TypedReassignment, TypedStorageField, TypedStructField, TypedTraitFn,
+    },
+    type_engine::TypeId,
     Declaration, EnumVariant, Expression, FunctionDeclaration, FunctionParameter, Reassignment,
     StorageField, StructField, TraitFn,
 };
+use sway_types::{Ident, Span};
 
 pub type TokenMap = HashMap<(Ident, Span), TokenType>;
 
@@ -17,6 +17,7 @@ pub type TokenMap = HashMap<(Ident, Span), TokenType>;
 pub struct TokenType {
     pub parsed: AstToken,
     pub typed: Option<TypedAstToken>,
+    pub type_id: Option<TypeId>,
 }
 
 impl TokenType {
@@ -24,6 +25,7 @@ impl TokenType {
         Self {
             parsed: token,
             typed: None,
+            type_id: None,
         }
     }
 }
